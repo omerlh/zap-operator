@@ -1,0 +1,7 @@
+apiVersion: zaproxy.owasp.org/v1alpha1
+kind: Zaproxy
+metadata:
+  name: example-zaproxy
+spec:
+  # Add fields here
+  size: 3
