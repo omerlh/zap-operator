@@ -30,9 +30,25 @@ spec:
           type: object
         spec:
           description: ZaproxySpec defines the desired state of Zaproxy
+          properties:
+            attackType:
+              type: string
+            tragetIngress:
+              type: string
+            tragetNamespace:
+              type: string
+          required:
+          - attackType
+          - tragetIngress
+          - tragetNamespace
           type: object
         status:
           description: ZaproxyStatus defines the observed state of Zaproxy
+          properties:
+            attackStatus:
+              type: string
+          required:
+          - attackStatus
           type: object
       type: object
   version: v1alpha1
