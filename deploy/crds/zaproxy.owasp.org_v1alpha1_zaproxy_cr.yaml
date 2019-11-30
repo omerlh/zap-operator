@@ -3,5 +3,6 @@ kind: Zaproxy
 metadata:
   name: example-zaproxy
 spec:
-  # Add fields here
-  size: 3
+  attackType: Passive
+  tragetNamespace: default
+  tragetIngress: juice-shop

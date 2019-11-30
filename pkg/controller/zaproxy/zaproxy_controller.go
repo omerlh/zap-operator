@@ -2,8 +2,8 @@ package zaproxy
 
 import (
 	"context"
-
-	zapv1alpha1 "github.com/omerlh/zap-operator/pkg/apis/zap/v1alpha1"
+	appsv1 "k8s.io/api/apps/v1"
+	zapv1alpha1 "github.com/omerlh/zap-operator/pkg/apis/zaproxy/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -17,6 +17,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
+	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/api/extensions/v1beta1"
 )
 
 var log = logf.Log.WithName("controller_zaproxy")
@@ -100,8 +102,27 @@ func (r *ReconcileZaproxy) Reconcile(request reconcile.Request) (reconcile.Resul
 		return reconcile.Result{}, err
 	}
 
+	targetIngress := &v1beta1.Ingress{}
+	err = r.client.Get(context.TODO(), types.NamespacedName{Name: instance.Spec.TargetIngress, Namespace: instance.Spec.TargetNamespace}, targetIngress)
+	if err != nil {
+		reqLogger.Info("Target ingress not found", "Ingress.Namespace", instance.Spec.TargetNamespace, "Ingress.Name", instance.Spec.TargetIngress)
+		return reconcile.Result{}, err
+	}
+
+	serviceName := targetIngress.Spec.Rules[0].IngressRuleValue.HTTP.Paths[0].Backend.ServiceName
+	targetHost := targetIngress.Spec.Rules[0].Host
+
+	targetService := &corev1.Service{}
+	err = r.client.Get(context.TODO(), types.NamespacedName{Name: serviceName, Namespace: instance.Spec.TargetNamespace}, targetService)
+	if err != nil {
+		reqLogger.Info("Target service not found", "Service.Namespace", instance.Spec.TargetNamespace, "Service.Name", serviceName)
+		return reconcile.Result{}, err
+	}
+
+	serviceIp := targetService.Spec.ClusterIP
+
 	// Define a new Pod object
-	pod := newPodForCR(instance)
+	pod := newPodForCR(instance, serviceIp, targetHost)
 
 	// Set Zaproxy instance as the owner and controller
 	if err := controllerutil.SetControllerReference(instance, pod, r.scheme); err != nil {
@@ -118,19 +139,68 @@ func (r *ReconcileZaproxy) Reconcile(request reconcile.Request) (reconcile.Resul
 			return reconcile.Result{}, err
 		}
 
-		// Pod created successfully - don't requeue
-		return reconcile.Result{}, nil
 	} else if err != nil {
+		return reconcile.Result{}, err
+	} else {
+		// Pod already exists - don't requeue
+		reqLogger.Info("Skip reconcile: Pod already exists", "Pod.Namespace", found.Namespace, "Pod.Name", found.Name)
+	}
+
+	// Define a new Pod object
+	service := newServiceForCR(instance)
+
+	// Set Zaproxy instance as the owner and controller
+	if err := controllerutil.SetControllerReference(instance, service, r.scheme); err != nil {
 		return reconcile.Result{}, err
 	}
 
-	// Pod already exists - don't requeue
-	reqLogger.Info("Skip reconcile: Pod already exists", "Pod.Namespace", found.Namespace, "Pod.Name", found.Name)
+	// Check if this Pod already exists
+	found2 := &corev1.Service{}
+	err = r.client.Get(context.TODO(), types.NamespacedName{Name: service.Name, Namespace: pod.Namespace}, found2)
+	if err != nil && errors.IsNotFound(err) {
+		reqLogger.Info("Creating a new Service", "Service.Namespace", service.Namespace, "Service.Name", service.Name)
+		err = r.client.Create(context.TODO(), service)
+		if err != nil {
+			return reconcile.Result{}, err
+		}
+
+	} else if err != nil {
+		return reconcile.Result{}, err
+	} else {
+		// Pod already exists - don't requeue
+		reqLogger.Info("Skip reconcile: Service already exists", "Service.Namespace", found.Namespace, "Service.Name", found.Name)
+	}
+
+	// Define a new Pod object
+	ingress := newCanaryIngressForCR(instance, targetHost)
+
+	// Set Zaproxy instance as the owner and controller
+	if err := controllerutil.SetControllerReference(instance, ingress, r.scheme); err != nil {
+		return reconcile.Result{}, err
+	}
+
+	// Check if this Pod already exists
+	found3 := &v1beta1.Ingress{}
+	err = r.client.Get(context.TODO(), types.NamespacedName{Name: ingress.Name, Namespace: pod.Namespace}, found3)
+	if err != nil && errors.IsNotFound(err) {
+		reqLogger.Info("Creating a new Canary Ingress", "Ingress.Namespace", ingress.Namespace, "Ingress.Name", ingress.Name)
+		err = r.client.Create(context.TODO(), ingress)
+		if err != nil {
+			return reconcile.Result{}, err
+		}
+
+	} else if err != nil {
+		return reconcile.Result{}, err
+	} else {
+		// Pod already exists - don't requeue
+		reqLogger.Info("Skip reconcile: Ingress already exists",  "Ingress.Namespace", ingress.Namespace, "Ingress.Name", ingress.Name)
+	}
+
 	return reconcile.Result{}, nil
 }
 
 // newPodForCR returns a busybox pod with the same name/namespace as the cr
-func newPodForCR(cr *zapv1alpha1.Zaproxy) *corev1.Pod {
+func newPodForCR(cr *zapv1alpha1.Zaproxy, targetServiceIp string, targetHost string) *corev1.Pod {
 	labels := map[string]string{
 		"app": cr.Name,
 	}
@@ -143,11 +213,103 @@ func newPodForCR(cr *zapv1alpha1.Zaproxy) *corev1.Pod {
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{
 				{
-					Name:    "busybox",
-					Image:   "busybox",
-					Command: []string{"sleep", "3600"},
+					Name:    "zaproxy",
+					Image:   "soluto/zap-ci:1551816665660",
+					Ports: []corev1.ContainerPort{
+						{
+							Name:          "http",
+							Protocol:      corev1.ProtocolTCP,
+							ContainerPort: 8090,
+						},
+					},
+					LivenessProbe:  &corev1.Probe{
+						Handler:  httpGetHandler("/", 8090),
+						InitialDelaySeconds: 60,
+						FailureThreshold: 10,
+					},
 				},
 			},
+			HostAliases: []corev1.HostAlias{
+				{
+					IP: targetServiceIp,
+					Hostnames: []string{targetHost},
+				},
+			},
+		},
+	}
+}
+
+// newServiceForCR returns a busybox service with the same name/namespace as the cr
+func newServiceForCR(cr *zapv1alpha1.Zaproxy) *corev1.Service {
+	labels := map[string]string{
+		"app": cr.Name,
+	}
+	return &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      cr.Name + "-service",
+			Namespace: cr.Namespace,
+			Labels:    labels,
+		},
+		Spec: corev1.ServiceSpec{
+			Selector: map[string]string{
+				"app": cr.Name,
+			},
+			Ports: []corev1.ServicePort{
+				{
+					Port:       80,
+					TargetPort: intstr.FromInt(8090),
+				},
+			},
+		},
+	}
+}
+
+// newServiceForCR returns a busybox service with the same name/namespace as the cr
+func newCanaryIngressForCR(cr *zapv1alpha1.Zaproxy, targetHost string) *v1beta1.Ingress {
+	labels := map[string]string{
+		"app": cr.Name,
+	}
+
+	return &v1beta1.Ingress{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      cr.Name + "-ingress",
+			Namespace: cr.Namespace,
+			Labels:    labels,
+			Annotations: map[string]string {
+				"nginx.ingress.kubernetes.io/canary": "true",
+    			"nginx.ingress.kubernetes.io/canary-weight": "5",
+			},
+		},
+		Spec: v1beta1.IngressSpec{
+			Rules: []v1beta1.IngressRule{
+				{
+					Host: targetHost,
+					IngressRuleValue: v1beta1.IngressRuleValue{
+						HTTP: &v1beta1.HTTPIngressRuleValue{
+							Paths: []v1beta1.HTTPIngressPath{
+								{
+									Path: "/",
+									Backend: v1beta1.IngressBackend{
+										ServiceName: cr.Name + "-service",
+										ServicePort: intstr.IntOrString{IntVal: 80},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	return nil
+}
+
+//source: https://github.com/divinerapier/learn-kubernetes/blob/a481964b876e07f255915699b6ab522d279329a1/test/e2e/common/container_probe.go
+func httpGetHandler(path string, port int) corev1.Handler {
+	return corev1.Handler{
+		HTTPGet: &corev1.HTTPGetAction{
+			Path: path,
+			Port: intstr.FromInt(port),
 		},
 	}
 }
