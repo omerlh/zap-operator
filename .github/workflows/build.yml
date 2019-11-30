@@ -21,6 +21,6 @@ jobs:
       env: 
         quay_password: ${{ secrets.quay_passowrd }}
       run: |
-        operator-sdk build docker.pkg.github.com/omerlh/zap-operator/zaproxy-operato:v0.0.1
+        operator-sdk build docker.pkg.github.com/omerlh/zap-operator/zaproxy-operator:v0.0.1
         docker login -u omerlh -p ${{ secrets.GITHUB_TOKEN }} docker.pkg.github.com
-        docker push docker.pkg.github.com/omerlh/zap-operator/zaproxy-operato:v0.0.1
+        docker push docker.pkg.github.com/omerlh/zap-operator/zaproxy-operator:v0.0.1
