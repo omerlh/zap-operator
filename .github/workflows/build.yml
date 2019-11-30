@@ -9,6 +9,9 @@ jobs:
 
     steps:
     - uses: actions/checkout@v1
+    - uses: actions/setup-go@v1
+      with:
+        go-version: '1.13.4'
     - name: Install Operator SDK
       run: |
         RELEASE_VERSION=v0.12.0
