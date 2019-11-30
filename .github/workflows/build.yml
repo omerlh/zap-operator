@@ -20,5 +20,5 @@ jobs:
     - name: Build & Deploy Image 
       run: |
         operator-sdk build quay.io/omerlh/zaproxy-operator:v0.0.1
-        docker login -u omerlh -p ${{ secrets.quay_password }} quay.io
+        docker login -u omerlh+github -p ${{ secrets.quay_password }} quay.io
         docker push quay.io/omerlh/zaproxy-operator:v0.0.1
