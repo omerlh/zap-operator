@@ -17,10 +17,10 @@ jobs:
         RELEASE_VERSION=v0.12.0
         curl -LO https://github.com/operator-framework/operator-sdk/releases/download/${RELEASE_VERSION}/operator-sdk-${RELEASE_VERSION}-x86_64-linux-gnu
         chmod +x operator-sdk-${RELEASE_VERSION}-x86_64-linux-gnu && sudo mkdir -p /usr/local/bin/ && sudo cp operator-sdk-${RELEASE_VERSION}-x86_64-linux-gnu /usr/local/bin/operator-sdk && rm operator-sdk-${RELEASE_VERSION}-x86_64-linux-gnu
-    - name: Run a multi-line script
+    - name: Build & Deploy Image
       env: 
         quay_password: ${{ secrets.quay_passowrd }}
       run: |
         operator-sdk build docker.pkg.github.com/omerlh/zap-operator/zaproxy-operato:v0.0.1
-        docker login -u omerlh -p ${{ secrets.GITHUB_TOKEN }}
+        docker login -u omerlh -p ${{ secrets.GITHUB_TOKEN }} docker.pkg.github.com
         docker push docker.pkg.github.com/omerlh/zap-operator/zaproxy-operato:v0.0.1
