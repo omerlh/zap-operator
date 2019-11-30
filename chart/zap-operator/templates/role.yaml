@@ -1,8 +1,12 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  creationTimestamp: null
-  name: zap-operator
+  name: {{ include "zap-operator.fullname" . }}-role
+  labels:
+    app.kubernetes.io/name: {{ include "zap-operator.name" . }}
+    helm.sh/chart: {{ include "zap-operator.chart" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
 rules:
 - apiGroups:
   - ""

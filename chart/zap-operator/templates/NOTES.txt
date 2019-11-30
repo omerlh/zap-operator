@@ -1,3 +1,7 @@
+Zap operator installed succesfully!
+
+To test it, create a new CRD:
+```
 apiVersion: zaproxy.owasp.org/v1alpha1
 kind: Zaproxy
 metadata:
@@ -5,4 +9,6 @@ metadata:
 spec:
   attackType: Passive
   tragetNamespace: default
-  tragetIngress: juice-shop
+  tragetIngress: <a name of exisitng ingress>
+
+```
